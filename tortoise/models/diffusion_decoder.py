@@ -50,10 +50,7 @@ class TimestepBlock(nn.Module):
 class TimestepEmbedSequential(nn.Sequential, TimestepBlock):
     def forward(self, x, emb):
         for layer in self:
-            if isinstance(layer, TimestepBlock):
-                x = layer(x, emb)
-            else:
-                x = layer(x)
+            x = layer(x, emb) if isinstance(layer, TimestepBlock) else layer(x)
         return x
 
 
@@ -210,21 +207,27 @@ class DiffusionTts(nn.Module):
         )
 
     def get_grad_norm_parameter_groups(self):
-        groups = {
+        return {
             'minicoder': list(self.contextual_embedder.parameters()),
             'layers': list(self.layers.parameters()),
-            'code_converters': list(self.code_embedding.parameters()) + list(self.code_converter.parameters()) + list(self.latent_conditioner.parameters()) + list(self.latent_conditioner.parameters()),
-            'timestep_integrator': list(self.conditioning_timestep_integrator.parameters()) + list(self.integrating_conv.parameters()),
+            'code_converters': list(self.code_embedding.parameters())
+            + list(self.code_converter.parameters())
+            + list(self.latent_conditioner.parameters())
+            + list(self.latent_conditioner.parameters()),
+            'timestep_integrator': list(
+                self.conditioning_timestep_integrator.parameters()
+            )
+            + list(self.integrating_conv.parameters()),
             'time_embed': list(self.time_embed.parameters()),
         }
-        return groups
 
     def get_conditioning(self, conditioning_input):
         speech_conditioning_input = conditioning_input.unsqueeze(1) if len(
             conditioning_input.shape) == 3 else conditioning_input
-        conds = []
-        for j in range(speech_conditioning_input.shape[1]):
-            conds.append(self.contextual_embedder(speech_conditioning_input[:, j]))
+        conds = [
+            self.contextual_embedder(speech_conditioning_input[:, j])
+            for j in range(speech_conditioning_input.shape[1])
+        ]
         conds = torch.cat(conds, dim=-1)
         conds = conds.mean(dim=-1)
         return conds
@@ -253,11 +256,10 @@ class DiffusionTts(nn.Module):
 
         if not return_code_pred:
             return expanded_code_emb
-        else:
-            mel_pred = self.mel_head(expanded_code_emb)
-            # Multiply mel_pred by !unconditioned_branches, which drops the gradient on unconditioned branches. This is because we don't want that gradient being used to train parameters through the codes_embedder as it unbalances contributions to that network from the MSE loss.
-            mel_pred = mel_pred * unconditioned_batches.logical_not()
-            return expanded_code_emb, mel_pred
+        mel_pred = self.mel_head(expanded_code_emb)
+        # Multiply mel_pred by !unconditioned_branches, which drops the gradient on unconditioned branches. This is because we don't want that gradient being used to train parameters through the codes_embedder as it unbalances contributions to that network from the MSE loss.
+        mel_pred = mel_pred * unconditioned_batches.logical_not()
+        return expanded_code_emb, mel_pred
 
     def forward(self, x, timesteps, aligned_conditioning=None, conditioning_latent=None, precomputed_aligned_embeddings=None, conditioning_free=False, return_code_pred=False):
         """
@@ -272,7 +274,7 @@ class DiffusionTts(nn.Module):
         :return: an [N x C x ...] Tensor of outputs.
         """
         assert precomputed_aligned_embeddings is not None or (aligned_conditioning is not None and conditioning_latent is not None)
-        assert not (return_code_pred and precomputed_aligned_embeddings is not None)  # These two are mutually exclusive.
+        assert not return_code_pred or precomputed_aligned_embeddings is None
 
         unused_params = []
         if conditioning_free:
@@ -314,9 +316,7 @@ class DiffusionTts(nn.Module):
             extraneous_addition = extraneous_addition + p.mean()
         out = out + extraneous_addition * 0
 
-        if return_code_pred:
-            return out, mel_pred
-        return out
+        return (out, mel_pred) if return_code_pred else out
 
 
 if __name__ == '__main__':

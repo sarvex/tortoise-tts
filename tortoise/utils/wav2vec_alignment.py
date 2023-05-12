@@ -51,7 +51,9 @@ class Wav2VecAlignment:
     """
     def __init__(self, device='cuda'):
         self.model = Wav2Vec2ForCTC.from_pretrained("jbetker/wav2vec2-large-robust-ft-libritts-voxpopuli").cpu()
-        self.feature_extractor = Wav2Vec2FeatureExtractor.from_pretrained(f"facebook/wav2vec2-large-960h")
+        self.feature_extractor = Wav2Vec2FeatureExtractor.from_pretrained(
+            "facebook/wav2vec2-large-960h"
+        )
         self.tokenizer = Wav2Vec2CTCTokenizer.from_pretrained('jbetker/tacotron-symbols')
         self.device = device
 
@@ -103,10 +105,10 @@ class Wav2VecAlignment:
                     break
 
         pop_till_you_win()
-        if not (len(expected_tokens) == 0 and len(alignments) == len(expected_text)):
+        if len(expected_tokens) != 0 or len(alignments) != len(expected_text):
             torch.save([audio, expected_text], 'alignment_debug.pth')
             assert False, "Something went wrong with the alignment algorithm. I've dumped a file, 'alignment_debug.pth' to" \
-                          "your current working directory. Please report this along with the file so it can get fixed."
+                              "your current working directory. Please report this along with the file so it can get fixed."
 
         # Now fix up alignments. Anything with -1 should be interpolated.
         alignments.append(orig_len)  # This'll get removed but makes the algorithm below more readable.

@@ -131,13 +131,10 @@ class CLVP(nn.Module):
         temp = self.temperature.exp()
 
         if not return_loss:
-            sim = einsum('n d, n d -> n', text_latents, speech_latents) * temp
-            return sim
-
+            return einsum('n d, n d -> n', text_latents, speech_latents) * temp
         sim = einsum('i d, j d -> i j', text_latents, speech_latents) * temp
         labels = torch.arange(b, device=device)
-        loss = (F.cross_entropy(sim, labels) + F.cross_entropy(sim.t(), labels)) / 2
-        return loss
+        return (F.cross_entropy(sim, labels) + F.cross_entropy(sim.t(), labels)) / 2
 
 
 if __name__ == '__main__':

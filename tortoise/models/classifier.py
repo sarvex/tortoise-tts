@@ -94,9 +94,11 @@ class AudioMiniEncoder(nn.Module):
         ch = base_channels
         res = []
         self.layers = depth
-        for l in range(depth):
-            for r in range(resnet_blocks):
-                res.append(ResBlock(ch, dropout, do_checkpoint=False, kernel_size=kernel_size))
+        for _ in range(depth):
+            res.extend(
+                ResBlock(ch, dropout, do_checkpoint=False, kernel_size=kernel_size)
+                for _ in range(resnet_blocks)
+            )
             res.append(Downsample(ch, use_conv=True, out_channels=ch*2, factor=downsample_factor))
             ch *= 2
         self.res = nn.Sequential(*res)
@@ -105,9 +107,10 @@ class AudioMiniEncoder(nn.Module):
             nn.SiLU(),
             nn.Conv1d(ch, embedding_dim, 1)
         )
-        attn = []
-        for a in range(attn_blocks):
-            attn.append(AttentionBlock(embedding_dim, num_attn_heads, do_checkpoint=False))
+        attn = [
+            AttentionBlock(embedding_dim, num_attn_heads, do_checkpoint=False)
+            for _ in range(attn_blocks)
+        ]
         self.attn = nn.Sequential(*attn)
         self.dim = embedding_dim
 
@@ -133,16 +136,14 @@ class AudioMiniEncoderWithClassifierHead(nn.Module):
         logits = self.head(h)
         if labels is None:
             return logits
+        if self.distribute_zero_label:
+            oh_labels = nn.functional.one_hot(labels, num_classes=self.num_classes)
+            zeros_indices = (labels == 0).unsqueeze(-1)
+            # Distribute 20% of the probability mass on all classes when zero is specified, to compensate for dataset noise.
+            zero_extra_mass = torch.full_like(oh_labels, dtype=torch.float, fill_value=.2/(self.num_classes-1))
+            zero_extra_mass[:, 0] = -.2
+            zero_extra_mass = zero_extra_mass * zeros_indices
+            oh_labels = oh_labels + zero_extra_mass
         else:
-            if self.distribute_zero_label:
-                oh_labels = nn.functional.one_hot(labels, num_classes=self.num_classes)
-                zeros_indices = (labels == 0).unsqueeze(-1)
-                # Distribute 20% of the probability mass on all classes when zero is specified, to compensate for dataset noise.
-                zero_extra_mass = torch.full_like(oh_labels, dtype=torch.float, fill_value=.2/(self.num_classes-1))
-                zero_extra_mass[:, 0] = -.2
-                zero_extra_mass = zero_extra_mass * zeros_indices
-                oh_labels = oh_labels + zero_extra_mass
-            else:
-                oh_labels = labels
-            loss = nn.functional.cross_entropy(logits, oh_labels)
-            return loss
+            oh_labels = labels
+        return nn.functional.cross_entropy(logits, oh_labels)

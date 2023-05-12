@@ -266,11 +266,11 @@ class TextToSpeech:
         with torch.no_grad():
             voice_samples = [v.to(self.device) for v in voice_samples]
 
-            auto_conds = []
             if not isinstance(voice_samples, list):
                 voice_samples = [voice_samples]
-            for vs in voice_samples:
-                auto_conds.append(format_conditioning(vs, device=self.device))
+            auto_conds = [
+                format_conditioning(vs, device=self.device) for vs in voice_samples
+            ]
             auto_conds = torch.stack(auto_conds, dim=1)
             self.autoregressive = self.autoregressive.to(self.device)
             auto_latent = self.autoregressive.get_conditioning(auto_conds)
@@ -323,7 +323,7 @@ class TextToSpeech:
             'standard': {'num_autoregressive_samples': 256, 'diffusion_iterations': 200},
             'high_quality': {'num_autoregressive_samples': 256, 'diffusion_iterations': 400},
         }
-        settings.update(presets[preset])
+        settings |= presets[preset]
         settings.update(kwargs) # allow overriding of preset settings with kwargs
         return self.tts(text, **settings)
 
@@ -499,13 +499,10 @@ class TextToSpeech:
                 if self.enable_redaction:
                     return self.aligner.redact(clip.squeeze(1), text).unsqueeze(1)
                 return clip
+
             wav_candidates = [potentially_redact(wav_candidate, text) for wav_candidate in wav_candidates]
 
-            if len(wav_candidates) > 1:
-                res = wav_candidates
-            else:
-                res = wav_candidates[0]
-
+            res = wav_candidates if len(wav_candidates) > 1 else wav_candidates[0]
             if return_deterministic_state:
                 return res, (deterministic_seed, text, voice_samples, conditioning_latents)
             else:

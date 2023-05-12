@@ -35,7 +35,7 @@ if __name__ == '__main__':
 
     # Process text
     with open(args.textfile, 'r', encoding='utf-8') as f:
-        text = ' '.join([l for l in f.readlines()])
+        text = ' '.join(list(f.readlines()))
     if '|' in text:
         print("Found the '|' character in your text, which I will use as a cue for where to split it up. If this was not"
               "your intent, please remove all '|' characters from the input.")

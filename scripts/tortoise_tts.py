@@ -170,12 +170,7 @@ for voices in selected_voices:
         if v != 'random' and v not in all_voices:
             parser.error(f'voice {v} not available, use --list-voices to see available voices.')
 
-if len(args.text) == 0:
-    text = ''
-    for line in sys.stdin:
-        text += line
-else:
-    text = ' '.join(args.text)
+text = ''.join(sys.stdin) if len(args.text) == 0 else ' '.join(args.text)
 text = text.strip()
 if args.text_split:
     desired_length, max_length = [int(x) for x in args.text_split.split(',')]
@@ -236,7 +231,7 @@ for voice_idx, voice in enumerate(selected_voices):
                 continue
         if not args.quiet:
             print(f'Rendering {clip_name} ({(voice_idx * len(texts) + text_idx + 1)} of {total_clips})...')
-            print('  ' + text)
+            print(f'  {text}')
         gen = tts.tts_with_preset(
             text, voice_samples=voice_samples, conditioning_latents=conditioning_latents, **gen_settings)
         gen = gen if args.candidates > 1 else [gen]

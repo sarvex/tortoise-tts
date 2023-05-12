@@ -86,7 +86,7 @@ def pick_and_pop(keys, d):
 
 
 def group_dict_by_key(cond, d):
-    return_val = [dict(), dict()]
+    return_val = [{}, {}]
     for key in d.keys():
         match = bool(cond(key))
         ind = int(not match)
@@ -206,8 +206,12 @@ class AlibiPositionalBias(nn.Module):
             return get_slopes_power_of_2(heads)
 
         closest_power_of_2 = 2 ** math.floor(math.log2(heads))
-        return get_slopes_power_of_2(closest_power_of_2) + get_slopes_power_of_2(2 * closest_power_of_2)[0::2][
-                                                           :heads - closest_power_of_2]
+        return (
+            get_slopes_power_of_2(closest_power_of_2)
+            + get_slopes_power_of_2(2 * closest_power_of_2)[::2][
+                : heads - closest_power_of_2
+            ]
+        )
 
     def forward(self, qk_dots):
         h, i, j, device = *qk_dots.shape[-3:], qk_dots.device
@@ -358,8 +362,7 @@ class RMSScaleShiftNorm(nn.Module):
 
         ss_emb = self.scale_shift_process(norm_scale_shift_inp)
         scale, shift = torch.chunk(ss_emb, 2, dim=1)
-        h = norm * (1 + scale.unsqueeze(1)) + shift.unsqueeze(1)
-        return h
+        return norm * (1 + scale.unsqueeze(1)) + shift.unsqueeze(1)
 
 
 # residual and residual gates
@@ -792,7 +795,9 @@ class AttentionLayers(nn.Module):
         else:
             self.rel_pos = None
 
-        assert not (not pre_norm and sandwich_norm), 'sandwich norm cannot be used when not using prenorm'
+        assert (
+            pre_norm or not sandwich_norm
+        ), 'sandwich norm cannot be used when not using prenorm'
         self.pre_norm = pre_norm
         self.sandwich_norm = sandwich_norm
 
@@ -810,7 +815,7 @@ class AttentionLayers(nn.Module):
 
         if cross_attend and not only_cross:
             default_block = ('a', 'c', 'f')
-        elif cross_attend and only_cross:
+        elif cross_attend:
             default_block = ('c', 'f')
         else:
             default_block = ('a', 'f')
@@ -957,7 +962,7 @@ class AttentionLayers(nn.Module):
             if exists(pre_branch_norm):
                 x = pre_branch_norm(x, **norm_args)
 
-            if layer_type == 'a' or layer_type == 'c':
+            if layer_type in ['a', 'c']:
                 if past_key_values is not None:
                     layer_kv = past_key_values.pop(0)
                     layer_past = tuple(s.to(x.device) for s in layer_kv)
@@ -968,11 +973,33 @@ class AttentionLayers(nn.Module):
                 out, inter, k, v = block(x, None, mask, None, attn_mask, self.pia_pos_emb, rotary_pos_emb,
                                         prev_attn, layer_mem, layer_past)
             elif layer_type == 'c':
-                if exists(full_context):
-                    out, inter, k, v = block(x, full_context[cross_attn_count], mask, context_mask, None, None,
-                                            None, prev_attn, None, layer_past)
-                else:
-                    out, inter, k, v = block(x, context, mask, context_mask, None, None, None, prev_attn, None, layer_past)
+                out, inter, k, v = (
+                    block(
+                        x,
+                        full_context[cross_attn_count],
+                        mask,
+                        context_mask,
+                        None,
+                        None,
+                        None,
+                        prev_attn,
+                        None,
+                        layer_past,
+                    )
+                    if exists(full_context)
+                    else block(
+                        x,
+                        context,
+                        mask,
+                        context_mask,
+                        None,
+                        None,
+                        None,
+                        prev_attn,
+                        None,
+                        layer_past,
+                    )
+                )
             elif layer_type == 'f':
                 out = block(x)
 
@@ -998,7 +1025,7 @@ class AttentionLayers(nn.Module):
             if layer_type == 'c':
                 cross_attn_count += 1
 
-            if layer_type == 'f':
+            elif layer_type == 'f':
                 hiddens.append(x)
 
         if return_hiddens:

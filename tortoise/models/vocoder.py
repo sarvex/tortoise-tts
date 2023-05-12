@@ -308,8 +308,7 @@ class UnivNetGenerator(nn.Module):
 
         audio = self.forward(mel, z)
         audio = audio[:, :, :-(self.hop_length * 10)]
-        audio = audio.clamp(min=-1, max=1)
-        return audio
+        return audio.clamp(min=-1, max=1)
 
 
 if __name__ == '__main__':

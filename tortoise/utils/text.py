@@ -43,7 +43,7 @@ def split_and_recombine_text(text, desired_length=200, max_length=300):
         c = seek(1)
         # do we need to force a split?
         if len(current) >= max_length:
-            if len(split_pos) > 0 and len(current) > (desired_length / 2):
+            if split_pos and len(current) > (desired_length / 2):
                 # we have at least one sentence and we are over half the desired length, seek back to the last split
                 d = pos - split_pos[-1]
                 seek(-d)
@@ -52,7 +52,6 @@ def split_and_recombine_text(text, desired_length=200, max_length=300):
                 while c not in '!?.\n ' and pos > 0 and len(current) > desired_length:
                     c = seek(-1)
             commit()
-        # check for sentence boundaries
         elif not in_quote and (c in '!?\n' or (c == '.' and peek(1) in '\n ')):
             # seek forward if we have consecutive boundary markers but still within the max length
             while pos < len(text) - 1 and len(current) < max_length and peek(1) in '!?.':
@@ -60,7 +59,6 @@ def split_and_recombine_text(text, desired_length=200, max_length=300):
             split_pos.append(pos)
             if len(current) >= desired_length:
                 commit()
-        # treat end of quote as a boundary if its followed by a space or newline
         elif in_quote and peek(1) == '"' and peek(2) in '\n ':
             seek(2)
             split_pos.append(pos)

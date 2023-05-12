@@ -23,11 +23,14 @@ def normal_kl(mean1, logvar1, mean2, logvar2):
     Shapes are automatically broadcasted, so batches can be compared to
     scalars, among other use cases.
     """
-    tensor = None
-    for obj in (mean1, logvar1, mean2, logvar2):
-        if isinstance(obj, th.Tensor):
-            tensor = obj
-            break
+    tensor = next(
+        (
+            obj
+            for obj in (mean1, logvar1, mean2, logvar2)
+            if isinstance(obj, th.Tensor)
+        ),
+        None,
+    )
     assert tensor is not None, "at least one argument must be a Tensor"
 
     # Force variances to be Tensors. Broadcasting helps convert scalars to
@@ -169,7 +172,7 @@ class LossType(enum.Enum):
     RESCALED_KL = 'rescaled_kl'  # like KL, but rescale to estimate the full VLB
 
     def is_vb(self):
-        return self == LossType.KL or self == LossType.RESCALED_KL
+        return self in [LossType.KL, LossType.RESCALED_KL]
 
 
 class GaussianDiffusion:
@@ -385,9 +388,7 @@ class GaussianDiffusion:
         def process_xstart(x):
             if denoised_fn is not None:
                 x = denoised_fn(x)
-            if clip_denoised:
-                return x.clamp(-1, 1)
-            return x
+            return x.clamp(-1, 1) if clip_denoised else x
 
         if self.model_mean_type == ModelMeanType.PREVIOUS_X:
             pred_xstart = process_xstart(
@@ -455,10 +456,9 @@ class GaussianDiffusion:
         This uses the conditioning strategy from Sohl-Dickstein et al. (2015).
         """
         gradient = cond_fn(x, self._scale_timesteps(t), **model_kwargs)
-        new_mean = (
+        return (
             p_mean_var["mean"].float() + p_mean_var["variance"] * gradient.float()
         )
-        return new_mean
 
     def condition_score(self, cond_fn, p_mean_var, x, t, model_kwargs=None):
         """
@@ -599,10 +599,7 @@ class GaussianDiffusion:
         if device is None:
             device = next(model.parameters()).device
         assert isinstance(shape, (tuple, list))
-        if noise is not None:
-            img = noise
-        else:
-            img = th.randn(*shape, device=device)
+        img = noise if noise is not None else th.randn(*shape, device=device)
         indices = list(range(self.num_timesteps))[::-1]
 
         for i in tqdm(indices, disable=not progress):
@@ -764,10 +761,7 @@ class GaussianDiffusion:
         if device is None:
             device = next(model.parameters()).device
         assert isinstance(shape, (tuple, list))
-        if noise is not None:
-            img = noise
-        else:
-            img = th.randn(*shape, device=device)
+        img = noise if noise is not None else th.randn(*shape, device=device)
         indices = list(range(self.num_timesteps))[::-1]
 
         if progress:
@@ -848,7 +842,7 @@ class GaussianDiffusion:
 
         terms = {}
 
-        if self.loss_type == LossType.KL or self.loss_type == LossType.RESCALED_KL:
+        if self.loss_type in [LossType.KL, LossType.RESCALED_KL]:
             # TODO: support multiple model outputs for this mode.
             terms["loss"] = self._vb_terms_bpd(
                 model=model,
@@ -860,7 +854,7 @@ class GaussianDiffusion:
             )["output"]
             if self.loss_type == LossType.RESCALED_KL:
                 terms["loss"] *= self.num_timesteps
-        elif self.loss_type == LossType.MSE or self.loss_type == LossType.RESCALED_MSE:
+        elif self.loss_type in [LossType.MSE, LossType.RESCALED_MSE]:
             model_outputs = model(x_t, self._scale_timesteps(t), **model_kwargs)
             if isinstance(model_outputs, tuple):
                 model_output = model_outputs[0]
@@ -906,10 +900,7 @@ class GaussianDiffusion:
             assert model_output.shape == target.shape == x_start.shape
             terms["mse"] = mean_flat((target - model_output) ** 2)
             terms["x_start_predicted"] = x_start_pred
-            if "vb" in terms:
-                terms["loss"] = terms["mse"] + terms["vb"]
-            else:
-                terms["loss"] = terms["mse"]
+            terms["loss"] = terms["mse"] + terms["vb"] if "vb" in terms else terms["mse"]
         else:
             raise NotImplementedError(self.loss_type)
 
@@ -934,11 +925,11 @@ class GaussianDiffusion:
             noise = th.randn_like(x_start)
         x_t = self.q_sample(x_start, t, noise=noise)
         terms = {}
-        if self.loss_type == LossType.KL or self.loss_type == LossType.RESCALED_KL:
+        if self.loss_type in [LossType.KL, LossType.RESCALED_KL]:
             assert False  # not currently supported for this type of diffusion.
-        elif self.loss_type == LossType.MSE or self.loss_type == LossType.RESCALED_MSE:
+        elif self.loss_type in [LossType.MSE, LossType.RESCALED_MSE]:
             model_outputs = model(x_t, x_start, self._scale_timesteps(t), **model_kwargs)
-            terms.update({k: o for k, o in zip(model_output_keys, model_outputs)})
+            terms |= dict(zip(model_output_keys, model_outputs))
             model_output = terms[gd_out_key]
             if self.model_var_type in [
                 ModelVarType.LEARNED,
@@ -978,10 +969,7 @@ class GaussianDiffusion:
             assert model_output.shape == target.shape == x_start.shape
             terms["mse"] = mean_flat((target - model_output) ** 2)
             terms["x_start_predicted"] = x_start_pred
-            if "vb" in terms:
-                terms["loss"] = terms["mse"] + terms["vb"]
-            else:
-                terms["loss"] = terms["mse"]
+            terms["loss"] = terms["mse"] + terms["vb"] if "vb" in terms else terms["mse"]
         else:
             raise NotImplementedError(self.loss_type)
 
@@ -1137,7 +1125,7 @@ class SpacedDiffusion(GaussianDiffusion):
         return super().condition_score(self._wrap_model(cond_fn), *args, **kwargs)
 
     def _wrap_model(self, model, autoregressive=False):
-        if isinstance(model, _WrappedModel) or isinstance(model, _WrappedAutoregressiveModel):
+        if isinstance(model, (_WrappedModel, _WrappedAutoregressiveModel)):
             return model
         mod = _WrappedAutoregressiveModel if autoregressive else _WrappedModel
         return mod(
@@ -1191,10 +1179,7 @@ def space_timesteps(num_timesteps, section_counts):
             raise ValueError(
                 f"cannot divide section of {size} steps into {section_count}"
             )
-        if section_count <= 1:
-            frac_stride = 1
-        else:
-            frac_stride = (size - 1) / (section_count - 1)
+        frac_stride = 1 if section_count <= 1 else (size - 1) / (section_count - 1)
         cur_idx = 0.0
         taken_steps = []
         for _ in range(section_count):
